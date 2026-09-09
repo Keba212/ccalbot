@@ -1,7 +1,7 @@
 const app = document.querySelector('#app');
 const tg = window.Telegram?.WebApp;
 const STORAGE_KEY = 'rytm-profile-v1';
-const FOOD_RULES_VERSION = 3;
+const FOOD_RULES_VERSION = 4;
 
 const foodCatalog = [
   { id: 'beans', name: 'Бобові', detail: 'сухі, сирі', group: 'Вуглеводи', kcal: 310, maxGrams: 115 },
@@ -79,8 +79,8 @@ if (resetForNewAccount) localStorage.removeItem(STORAGE_KEY);
 let state = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null') || defaultState;
 if (resetForNewAccount) window.history.replaceState({}, document.title, window.location.pathname);
 if (state.foodRulesVersion !== FOOD_RULES_VERSION) {
+  state.foodLog ??= {};
   state.foodRulesVersion = FOOD_RULES_VERSION;
-  state.foodLog = {};
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 tg?.ready();
@@ -100,8 +100,29 @@ function foodKcal(item, grams) { return grams / foodOriginalMax(item) * category
 function foodConsumed(id) { return Number(state.foodLog?.[id] || 0); }
 function categoryConsumedKcal(group) { return foodCatalog.filter(item => item.group === group).reduce((sum, item) => sum + foodKcal(item, foodConsumed(item.id)), 0); }
 function foodOriginalMax(item) { return Math.max(5, Math.round(item.maxGrams * portionScale() / 5) * 5); }
-function foodAvailableMax(item) { return Math.max(0, Math.floor((foodOriginalMax(item) - categoryConsumedKcal(item.group) / (categoryCalories[item.group] * portionScale()) * foodOriginalMax(item)) / 5) * 5); }
+function foodAvailableMax(item) { return Math.max(0, Math.round(foodOriginalMax(item) - categoryConsumedKcal(item.group) / (categoryCalories[item.group] * portionScale()) * foodOriginalMax(item))); }
 function loggedFoodKcal() { return foodCatalog.reduce((sum, item) => sum + foodKcal(item, foodConsumed(item.id)), 0); }
+function loggedFoodMacros() {
+  const groupProfiles = {
+    'Вуглеводи': { protein: 7, fats: 2 },
+    'Білки': { protein: 22, fats: 5 },
+    'Овочі': { protein: 2, fats: 0.3 },
+    'Жири': { protein: 0, fats: 90 },
+    'Молочні': { protein: 5, fats: 2 },
+    'Фрукти': { protein: 1, fats: 0.3 },
+    'Додатково': { protein: 15, fats: 35 },
+    'Рідко': { protein: 5, fats: 20 },
+  };
+  return foodCatalog.reduce((totals, item) => {
+    const grams = foodConsumed(item.id);
+    const profile = groupProfiles[item.group];
+    const carbs = Math.max(0, (item.kcal - profile.protein * 4 - profile.fats * 9) / 4);
+    totals.protein += grams / 100 * profile.protein;
+    totals.fats += grams / 100 * profile.fats;
+    totals.carbs += grams / 100 * carbs;
+    return totals;
+  }, { protein: 0, fats: 0, carbs: 0 });
+}
 function categoryClosed(group) { return categoryConsumedKcal(group) >= categoryCalories[group] * portionScale() - 1; }
 function groupIcon(group) { return { 'Вуглеводи': 'А', 'Білки': 'Б', 'Овочі': 'В', 'Жири': 'Г', 'Молочні': 'Д', 'Фрукти': 'Е', 'Додатково': 'Є', 'Рідко': 'Ж' }[group] || '•'; }
 function groupTone(group) { return { 'Вуглеводи': 'tone-blue', 'Білки': 'tone-red', 'Овочі': 'tone-green', 'Жири': 'tone-gold', 'Молочні': 'tone-purple', 'Фрукти': 'tone-pink', 'Додатково': 'tone-brown', 'Рідко': 'tone-orange' }[group] || 'tone-blue'; }
@@ -200,7 +221,7 @@ function renderFoods() {
   const groupsMarkup = groups.map(group => {
     const closed = categoryClosed(group);
     const visibleItems = foodCatalog.filter(item => item.group === group && (!closed || foodConsumed(item.id) > 0));
-    const rows = visibleItems.map(item => { const consumed = foodConsumed(item.id); const max = foodOriginalMax(item); const available = foodAvailableMax(item); return `<button class="food-item food-row ${consumed ? 'is-logged' : ''}" data-food-id="${item.id}" type="button"><span class="food-letter ${groupTone(group)}">${groupIcon(group)}</span><span class="food-row-info"><strong>${esc(item.name)}</strong><small>${item.kcal} ккал · ${item.detail}</small></span><span class="food-row-amount"><b>${consumed}</b> / ${consumed ? max : available} г<small>${consumed ? 'з’їдено' : 'доступно сьогодні'}</small></span></button>`; }).join('');
+    const rows = visibleItems.map(item => { const consumed = foodConsumed(item.id); const max = foodOriginalMax(item); const available = foodAvailableMax(item); return `<button class="food-item food-row ${consumed ? 'is-logged' : ''}" data-food-id="${item.id}" type="button"><span class="food-letter ${groupTone(group)}">${groupIcon(group)}</span><span class="food-row-info"><strong>${esc(item.name)}</strong><small>${item.kcal} ккал · ${item.detail}</small></span><span class="food-row-amount"><b>${available}</b> г<small>${consumed ? `залишилось (з’їдено ${consumed} / ${max} г)` : 'доступно сьогодні'}</small></span></button>`; }).join('');
     return `<div class="food-group ${closed ? 'is-closed' : ''}"><div class="food-group-head"><h2>${group}</h2>${closed ? '<span class="closed-badge">закрито ✓</span>' : ''}</div><div class="food-grid">${rows}</div></div>`;
   }).join('');
   shell(`<section class="products-head fade-in"><button class="back-button" id="back-today" type="button">← Сьогодні</button><div class="products-title"><div><p class="eyebrow">щоденний конструктор</p><h1>Продукти</h1><p class="lead">Натисни на продукт і вкажи, скільки з’їв. Усі ваги вказані в сирому вигляді.</p></div><div class="products-kcal"><strong>${Math.round(eatenKcal)}</strong><span>/ ${state.profile?.target || 0} ккал</span></div></div><div class="catalog-progress"><span style="width:${Math.min(100, Math.round(eatenKcal / (state.profile?.target || 1) * 100))}%"></span></div></section><section class="food-catalog food-list fade-in">${groupsMarkup}</section><nav class="bottom-nav"><button class="nav-item" type="button" id="today-nav"><span class="nav-icon">⌂</span>Сьогодні</button><button class="nav-item active" type="button"><span class="nav-icon">▦</span>Продукти</button><button class="nav-item" type="button" id="edit-profile"><span class="nav-icon">◌</span>Профіль</button></nav>`);
@@ -214,7 +235,9 @@ function openCatalogEditor(foodId) {
   const item = food(foodId);
   const originalMax = foodOriginalMax(item);
   const current = foodConsumed(item.id);
-  app.insertAdjacentHTML('beforeend', `<div class="food-modal" role="dialog" aria-modal="true"><form class="food-modal-card product-modal-card"><button class="modal-close" type="button" aria-label="Закрити">×</button><h2>${esc(item.name)}</h2><p class="modal-note">Оригінальна рекомендація: ${originalMax} г</p><div class="category-limit">Спожито в категорії: ${Math.round(categoryConsumedKcal(item.group))} ккал. Інші продукти групи зменшаться автоматично.</div><label for="catalog-grams">Кількість (грам): <strong id="catalog-grams-value">${current}</strong> <small>(макс: ${originalMax} г)</small></label><input id="catalog-grams" type="range" min="0" max="${originalMax}" step="5" value="${current}" /><div class="modal-stats"><strong><span id="modal-kcal">${Math.round(foodKcal(item, current))}</span><small>ккал</small></strong><strong><span>${Math.round(foodKcal(item, current) * .4)}</span><small>білки</small></strong></div><div class="quick-grams">${[25, 50, 75, 100].map(percent => `<button type="button" data-percent="${percent}">${percent}%</button>`).join('')}</div><div class="modal-actions"><button class="secondary modal-cancel" type="button">Скасувати</button><button class="primary" type="submit">Підтвердити</button></div></form></div>`);
+  const available = foodAvailableMax(item);
+  const allowedMax = Math.min(originalMax, current + available);
+  app.insertAdjacentHTML('beforeend', `<div class="food-modal" role="dialog" aria-modal="true"><form class="food-modal-card product-modal-card"><button class="modal-close" type="button" aria-label="Закрити">×</button><h2>${esc(item.name)}</h2><p class="modal-note">Оригінальна рекомендація: ${originalMax} г</p><div class="category-limit">Залишилось у категорії: ${Math.round((categoryCalories[item.group] * portionScale()) - categoryConsumedKcal(item.group))} ккал. Інші продукти групи зменшаться автоматично.</div><label for="catalog-grams">Кількість (грам): <strong id="catalog-grams-value">${current}</strong> <small>(максимум зараз: ${allowedMax} г)</small></label><input id="catalog-grams" type="range" min="0" max="${allowedMax}" step="1" value="${Math.min(current, allowedMax)}" /><div class="modal-stats"><strong><span id="modal-kcal">${Math.round(foodKcal(item, current))}</span><small>ккал</small></strong><strong><span>${Math.round(foodKcal(item, current) * .4)}</span><small>білки</small></strong></div><div class="quick-grams">${[25, 50, 75, 100].map(percent => `<button type="button" data-percent="${percent}">${percent}%</button>`).join('')}</div><div class="modal-actions"><button class="secondary modal-cancel" type="button">Скасувати</button><button class="primary" type="submit">Підтвердити</button></div></form></div>`);
   const modal = document.querySelector('.food-modal');
   const slider = modal.querySelector('#catalog-grams');
   const update = grams => { modal.querySelector('#catalog-grams-value').textContent = grams; modal.querySelector('#modal-kcal').textContent = Math.round(foodKcal(item, grams)); slider.value = grams; };
@@ -222,7 +245,7 @@ function openCatalogEditor(foodId) {
   slider.addEventListener('input', () => update(Number(slider.value)));
   modal.querySelector('.modal-close').addEventListener('click', () => modal.remove());
   modal.querySelector('.modal-cancel').addEventListener('click', () => modal.remove());
-  modal.querySelector('form').addEventListener('submit', event => { event.preventDefault(); state.foodLog[item.id] = Number(slider.value); save(); modal.remove(); renderFoods(); });
+  modal.querySelector('form').addEventListener('submit', event => { event.preventDefault(); state.foodLog[item.id] = Math.min(allowedMax, Number(slider.value)); save(); modal.remove(); renderFoods(); });
 }
 
 function dashboardData() {
@@ -353,7 +376,14 @@ function refreshDashboardData() {
 function renderDashboard() {
   ensureDailyPlan();
   const p = state.profile; const eaten = Math.round(loggedFoodKcal()); const percent = Math.min(100, Math.round(eaten / p.target * 100));
+  const macros = loggedFoodMacros();
+  const proteinTarget = p.protein || Math.round((p.weight || 0) * 1.6);
+  const fatsTarget = p.fats || Math.round((p.weight || 0) * .8);
+  const macroTargets = { protein: proteinTarget, fats: fatsTarget, carbs: p.carbs || Math.round((p.target - proteinTarget * 4 - fatsTarget * 9) / 4) };
+  const macroItems = [['protein', 'Білки', macroTargets.protein, '#52a781'], ['fats', 'Жири', macroTargets.fats, 'var(--coral)'], ['carbs', 'Вуглеводи', macroTargets.carbs, '#c19628']];
+  const macroMarkup = macroItems.map(([key, label, target, color]) => `<div class="nutrition-macro"><div><strong>${Math.round(macros[key])} г</strong><span>${label}</span><small>з ${target} г</small></div><div class="nutrition-track"><span style="width:${Math.min(100, Math.round(macros[key] / target * 100))}%; background:${color}"></span></div></div>`).join('');
   shell(`<section class="home-title fade-in"><div><p class="greeting">Привіт, ${esc(p.name)} 👋</p><h1>Головна</h1><p class="date">${today()} · твій прогрес</p></div><div class="profile-badge">${esc((p.name || 'К').slice(0, 1).toUpperCase())}</div></section><section class="dashboard-grid fade-in"><article class="dash-card meal-progress-card"><div class="dash-card-main"><div class="dash-icon">🍴</div><strong>${eaten > 0 ? 'Раціон частково завершено' : 'Раціон ще не розпочато'}</strong><p>${eaten.toLocaleString('uk-UA')} з ${p.target.toLocaleString('uk-UA')} ккал</p><div class="mini-progress"><span style="width:${percent}%"></span></div></div><div class="ring" style="--progress:${percent}%"><span>${percent}%<small>Ккал</small></span></div></article><article class="dash-card"><div class="dash-card-main"><div class="dash-icon steps-icon">♧</div><strong>0</strong><p>Кроків сьогодні</p><small>Ціль: 7 000 кроків</small></div><div class="ring muted-ring"><span>0%<small>кроки</small></span></div></article><article class="dash-card"><div class="dash-card-main"><div class="dash-icon training-icon">♧</div><strong>2/3</strong><p>тренувань цього тижня</p><small>Останнє: тренування 14 годин тому</small></div><div class="ring dark-ring"><span>67%<small>тиждень</small></span></div></article><article class="dash-card"><div class="dash-card-main"><div class="dash-icon measure-icon">⌁</div><strong>98 <em>кг</em> <b>↓ 1,2 кг</b></strong><p>поточна вага</p><small>Ціль: 75 кг</small></div><div class="ring dark-ring"><span>32%<small>ціль</small></span></div></article><article class="dash-card chart-card"><span class="alert-dot"></span><div class="dash-card-main"><div class="dash-icon measure-icon">⌁</div><strong>39 <em>см</em></strong><p>обхват плеча</p></div><span class="sparkline">⌁⌁⌁</span></article><article class="dash-card chart-card"><span class="alert-dot"></span><div class="dash-card-main"><div class="dash-icon measure-icon">⌁</div><strong>104 <em>см</em> <b class="negative">↓ 3 см</b></strong><p>обхват грудей</p></div><span class="sparkline down">⌁⌁⌁</span></article><article class="dash-card chart-card"><span class="alert-dot"></span><div class="dash-card-main"><div class="dash-icon measure-icon">⌁</div><strong>94 <em>см</em> <b>↓ 3 см</b></strong><p>обхват талії</p></div><span class="sparkline wave">⌁⌁⌁</span></article><article class="dash-card chart-card"><span class="alert-dot"></span><div class="dash-card-main"><div class="dash-icon measure-icon">⌁</div><strong>107 <em>см</em> <b>↓ 3 см</b></strong><p>обхват стегон</p></div><span class="sparkline wave">⌁⌁⌁</span></article><article class="dash-card chart-card"><span class="alert-dot"></span><div class="dash-card-main"><div class="dash-icon measure-icon">⌁</div><strong>54 <em>см</em></strong><p>обхват стегна</p></div><span class="sparkline down">⌁⌁⌁</span></article></section><button class="report-button" type="button">➤ &nbsp; Надіслати звіт</button><nav class="bottom-nav"><button class="nav-item active" type="button" id="today-nav"><span class="nav-icon">⌂</span>Головна</button><button class="nav-item" type="button" id="foods-nav"><span class="nav-icon">▦</span>Продукти</button><button class="nav-item" type="button" id="edit-profile"><span class="nav-icon">◌</span>Профіль</button></nav>`);
+  document.querySelector('.dashboard-grid').insertAdjacentHTML('beforebegin', `<section class="nutrition-summary fade-in"><div class="nutrition-head"><div><p class="eyebrow">щоденний баланс</p><h2>Харчування сьогодні</h2></div><span>орієнтовно</span></div><div class="nutrition-calories"><strong>${eaten.toLocaleString('uk-UA')}</strong><span>з ${p.target.toLocaleString('uk-UA')} ккал</span></div><div class="nutrition-progress"><span style="width:${percent}%"></span></div><div class="nutrition-macros">${macroMarkup}</div></section>`);
   refreshDashboardData();
   document.querySelector('#edit-profile').addEventListener('click', renderOnboarding);
   document.querySelector('#foods-nav').addEventListener('click', renderFoods);
