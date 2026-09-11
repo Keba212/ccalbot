@@ -91,6 +91,25 @@ function save() { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
 function esc(value) { return String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function today() { return new Intl.DateTimeFormat('uk-UA', { day: 'numeric', month: 'long' }).format(new Date()); }
 function dayKey() { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
+function resetDailyFoodLog() {
+  state.foodLog = {};
+  state.foodLogDate = dayKey();
+  save();
+}
+function ensureDailyFoodLog() {
+  if (state.foodLogDate !== dayKey()) resetDailyFoodLog();
+  state.foodLog ??= {};
+}
+function scheduleDailyFoodReset() {
+  const now = new Date();
+  const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  window.setTimeout(() => {
+    resetDailyFoodLog();
+    if (document.querySelector('.food-catalog')) renderFoods();
+    else if (document.querySelector('.dashboard-grid')) renderDashboard();
+    scheduleDailyFoodReset();
+  }, nextMidnight - now + 50);
+}
 function userName() { return tg?.initDataUnsafe?.user?.first_name || 'друже'; }
 function shell(content) { app.innerHTML = `<header class="topbar"><div class="brand"><span class="brand-mark">Р</span><span>Ритм</span></div><div class="status"><i class="status-dot"></i> все під контролем</div></header>${content}`; }
 
@@ -215,7 +234,7 @@ function openFoodEditor(mealId, itemId) {
 }
 
 function renderFoods() {
-  state.foodLog ??= {};
+  ensureDailyFoodLog();
   const eatenKcal = foodCatalog.reduce((sum, item) => sum + foodKcal(item, foodConsumed(item.id)), 0);
   const groups = [...new Set(foodCatalog.map(item => item.group))];
   const groupsMarkup = groups.map(group => {
@@ -224,10 +243,11 @@ function renderFoods() {
     const rows = visibleItems.map(item => { const consumed = foodConsumed(item.id); const max = foodOriginalMax(item); const available = foodAvailableMax(item); return `<button class="food-item food-row ${consumed ? 'is-logged' : ''}" data-food-id="${item.id}" type="button"><span class="food-letter ${groupTone(group)}">${groupIcon(group)}</span><span class="food-row-info"><strong>${esc(item.name)}</strong><small>${item.kcal} ккал · ${item.detail}</small></span><span class="food-row-amount"><b>${available}</b> г<small>${consumed ? `залишилось (з’їдено ${consumed} / ${max} г)` : 'доступно сьогодні'}</small></span></button>`; }).join('');
     return `<div class="food-group ${closed ? 'is-closed' : ''}"><div class="food-group-head"><h2>${group}</h2>${closed ? '<span class="closed-badge">закрито ✓</span>' : ''}</div><div class="food-grid">${rows}</div></div>`;
   }).join('');
-  shell(`<section class="products-head fade-in"><button class="back-button" id="back-today" type="button">← Сьогодні</button><div class="products-title"><div><p class="eyebrow">щоденний конструктор</p><h1>Продукти</h1><p class="lead">Натисни на продукт і вкажи, скільки з’їв. Усі ваги вказані в сирому вигляді.</p></div><div class="products-kcal"><strong>${Math.round(eatenKcal)}</strong><span>/ ${state.profile?.target || 0} ккал</span></div></div><div class="catalog-progress"><span style="width:${Math.min(100, Math.round(eatenKcal / (state.profile?.target || 1) * 100))}%"></span></div></section><section class="food-catalog food-list fade-in">${groupsMarkup}</section><nav class="bottom-nav"><button class="nav-item" type="button" id="today-nav"><span class="nav-icon">⌂</span>Сьогодні</button><button class="nav-item active" type="button"><span class="nav-icon">▦</span>Продукти</button><button class="nav-item" type="button" id="edit-profile"><span class="nav-icon">◌</span>Профіль</button></nav>`);
+  shell(`<section class="products-head fade-in"><button class="back-button" id="back-today" type="button">← Сьогодні</button><div class="products-title"><div><p class="eyebrow">щоденний конструктор</p><h1>Продукти</h1><p class="lead">Натисни на продукт і вкажи, скільки з’їв. Усі ваги вказані в сирому вигляді.</p></div><div class="products-kcal"><strong>${Math.round(eatenKcal)}</strong><span>/ ${state.profile?.target || 0} ккал</span></div></div><div class="catalog-progress"><span style="width:${Math.min(100, Math.round(eatenKcal / (state.profile?.target || 1) * 100))}%"></span></div><button class="secondary reset-food-button" id="reset-food-log" type="button">Скинути за сьогодні</button></section><section class="food-catalog food-list fade-in">${groupsMarkup}</section><nav class="bottom-nav"><button class="nav-item" type="button" id="today-nav"><span class="nav-icon">⌂</span>Сьогодні</button><button class="nav-item active" type="button"><span class="nav-icon">▦</span>Продукти</button><button class="nav-item" type="button" id="edit-profile"><span class="nav-icon">◌</span>Профіль</button></nav>`);
   document.querySelector('#back-today').addEventListener('click', renderDashboard);
   document.querySelector('#today-nav').addEventListener('click', renderDashboard);
   document.querySelector('#edit-profile').addEventListener('click', renderOnboarding);
+  document.querySelector('#reset-food-log').addEventListener('click', () => { resetDailyFoodLog(); renderFoods(); });
   document.querySelectorAll('.food-row').forEach(row => row.addEventListener('click', () => openCatalogEditor(row.dataset.foodId)));
 }
 
@@ -400,4 +420,6 @@ function renderDashboard() {
   document.querySelector('.report-button').addEventListener('click', openReport);
 }
 
+ensureDailyFoodLog();
+scheduleDailyFoodReset();
 state.profile ? renderDashboard() : renderOnboarding();

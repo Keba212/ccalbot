@@ -183,6 +183,7 @@ input:focus, select:focus { border-color: var(--lime-deep); box-shadow: 0 0 0 3p
 .products-kcal span { color: var(--muted); font-size: 11px; }
 .catalog-progress { height: 7px; margin-top: 18px; border-radius: 8px; background: #e2e7e1; overflow: hidden; }
 .catalog-progress span { display: block; height: 100%; border-radius: inherit; background: var(--ink); transition: width .3s ease; }
+.reset-food-button { width: 100%; margin-top: 12px; }
 .back-button { border: 0; padding: 0; margin-bottom: 28px; color: var(--ink); background: transparent; font-weight: 700; }
 .food-catalog { display: grid; gap: 22px; }
 .food-list { gap: 17px; }
